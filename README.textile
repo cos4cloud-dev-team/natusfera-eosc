@@ -1,4 +1,5 @@
-h2. Natusfera
+h2. Natusfera-eosc
 
-Natusfera en un proyecto de código abierto desarrollo de forma conjunta por el CSIC y Bineo Consuling SLU bajo la licencia bajo licencia CC-BY-NC, basado en la plataforma de código abierto iNaturalist.
+Natusfera in an open source project jointly developed by the CSIC and Bineo Consuling SLU under the CC-BY-NC license, based on the iNaturalist open source platform.
+In this repository the code will be imroved following the requirements derived in the Cos4Cloud project
 
