@@ -1,0 +1,810 @@
+<html>
+<head>	
+	<link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">	
+	<%= stylesheet_link_tag 'new_welcome' %> 
+	<link href='https://fonts.googleapis.com/css?family=PT+Sans' rel='stylesheet' type='text/css'>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+  <script src="https://code.jquery.com/ui/1.12.0-rc.2/jquery-ui.min.js"></script>
+	<script src="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+<!-- Google maps include -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCCeenRdnkY-eXliSSYWMykY8-AzO_z5aM" type="text/javascript"></script>
+  <%= javascript_include_tag 'jquery.webticker.min' %>
+	<%= javascript_include_tag 'isotope.pkgd.min' %>
+	<%= javascript_include_tag 'wax.g' %>
+  <%= javascript_include_tag "i18n" %>
+  <%= javascript_include_tag "translations" %>
+<script>
+	function toggleHeaderSubnav(link) {
+	  if ($(link).parents('.subnavtab').hasClass('open')) {
+	    closeHeaderSubnav(link);
+	  } else {
+	    openHeaderSubnav(link);
+	  }
+	}
+
+	function openHeaderSubnav(link) {
+	  $('.subnav').hide();
+	  $('.subnavtab').removeClass('open');
+	  $(link).parents('.subnavtab').addClass('open');
+	  $(link).parents('li').find('.subnav').show();
+	  $(document).click(subnavClickOff);
+	}
+
+	function closeHeaderSubnav(link) {
+	  $(link).parents('.subnavtab').removeClass('open');
+	  $(link).parents('li').find('.subnav').hide();
+	  $(document).unbind('click', subnavClickOff);
+	}
+
+	function subnavClickOff(e) {
+	  if ($(e.target).parents('.subnavwrapper').length == 0) {
+	    $('.subnav').hide();
+	    $('.subnavtab').removeClass('open');
+	  }
+	}
+
+  function getUpdatesCount() {
+    $.get('/users/updates_count', function(data) {
+      setUpdatesCount(data.count)
+    })
+  }
+
+  function setUpdatesCount(count, options) {
+    options = options || {}
+    if (count > 0) {
+      if (options.skipAnimation) {
+        $('#header .updates').addClass('alert')
+      } else {
+        $('#header .updates').switchClass('', 'alert')
+      }
+      $('#header .updates .count').html(count)
+    } else {
+      if (options.skipAnimation) {
+        $('#header .updates').removeClass('alert')
+      } else {
+        $('#header .updates').switchClass('alert', '')
+      }
+      $('#header .updates .count').html(0)
+    }
+  }
+
+  function setMessagesCount(count, options) {
+    options = options || {}
+    if (count > 0) {
+      if (options.skipAnimation) {
+        $('#header .messages').addClass('alert')
+      } else {
+        $('#header .messages').switchClass('', 'alert')
+      }
+      $('#header .messages .count').html(count)
+    } else {
+      if (options.skipAnimation) {
+        $('#header .messages').removeClass('alert')
+      } else {
+        $('#header .messages').switchClass('alert', '')
+      }
+      $('#header .messages .count').html(0)
+    }
+  }
+
+  function getMessagesCount() {
+    $.get('/messages/count', function(data) {
+      setMessagesCount(data.count)
+    })
+  }
+</script>
+<script>
+	$(document).ready(function(){
+    window.observations = <%=json_escape @observations.to_json( :include => { :observation_photos => { :include => { :photo => { :except => :metadata } } } }).html_safe %>;
+
+    var infoWindow;
+
+    var map = new google.maps.Map(document.getElementById('map'), {
+      center: {lat: -34.397, lng: 150.644},
+      zoom: 9,
+      maxZoom: 13,
+      minZoom: 9
+    });
+    
+    var features = [];
+    if(observations){
+      for(var i = 0; i < observations.length; i++){
+        var obs_n = observations[i];
+        var marker = new google.maps.Marker({
+          position: {lat: parseFloat(obs_n.latitude), lng: parseFloat(obs_n.longitude)},
+          icon: "<%= image_url("mapMarkers/natusfera-marker-mini.png") %>"
+        });
+        features.push({ marker: marker, observation: obs_n  });
+      } 
+    }
+
+    var tile_server_url = <%= CONFIG.tile_servers.windshaft.inspect.html_safe %>;
+    //var tile_server_url = "http://193.146.75.173:4000";
+
+	  var tilejson = {
+			tiles : [tile_server_url + "/observations/points/{z}/{x}/{y}.png?"],
+			grids: [tile_server_url + "/observations/points/{z}/{x}/{y}.grid.json?&interactivity=id,taxon_id,species_guess,latitude,longitude,positional_accuracy,captive,quality_grade,iconic_taxon_id"],
+			template : "{{species_guess}}",
+			interactivity : "id,taxon_id,species_guess,latitude,longitude,positional_accuracy,captive,quality_grade,iconic_taxon_id"	
+		};
+
+		var interactionlayer = new wax.g.connector( tilejson );
+
+		map.overlayMapTypes.push(interactionlayer);
+
+    wax.g.interaction().map(map).tilejson(tilejson)
+    .on({
+      on: function(o) {
+        document.body.style.cursor = 'pointer'
+        if (o.e.type == 'click') {
+          // if the click is anywhere within the InfoWindow, don't act on it
+          if($('.gm-style-iw').parent().find(o.e.target).length > 0) { return false; }
+          if(o.data['latitude']){
+            var latLng = new google.maps.LatLng(o.data['latitude'],o.data['longitude']);
+            $.ajax({
+              url:  '/observations/' + o.data['id'] + '.html?partial=cached_component',              
+              //url:  '/observations/132.html?partial=cached_component',
+              type: 'GET',
+              dataType: 'html',
+              beforeSend: function() {
+                var iw = getInfoWindow();
+                iw.position = latLng;                
+                iw.setContent($('<div class="loading status">Loading...</div>').get(0));
+                iw.open(map);                
+              },
+              success: function(data) {
+                var iw = getInfoWindow()
+                iw.position = latLng;                
+                iw.setContent($('<div class="compact mini infowindow observations"></div>').append(data).get(0));
+                iw.open(map);
+                // make sure the InfoWindow has focus
+                $(iw).focus();                
+              },
+              error: function(jqXHR, textStatus, errorThrown) {
+                console.log(textStatus);
+              }
+            });
+          }
+        } else if (o.e.type == 'mousemove') {
+          map.setOptions({ draggableCursor: 'pointer' });
+        }
+      },
+      off: function(o) {
+        map.setOptions({ draggableCursor: 'url(http://maps.google.com/mapfiles/openhand.cur), move' });
+      }
+    });
+    var data_slice_to_html = function(data_slice){
+      var retVal = "<a class=\"username_label\" href=\"" + data_slice.url + "\">" + data_slice.name + "</a> - <a class=\"species_label\" href=\"" + data_slice.especie_url + "\">" + data_slice.especie + "</a>";
+      if(data_slice.place_guess_url){
+        retVal = retVal + ", " + data_slice.place_guess_url;
+      }
+      return retVal;
+    }
+
+    var activate_locale_link = function(locale){
+      var control = $("#locale_" + locale);
+      if(control){
+        $(".locale_link").removeClass("active");
+        control.addClass("active");
+      }
+    }
+
+    var init_locale = '<%= I18n.locale %>';
+
+    if(init_locale && init_locale != ''){
+      activate_locale_link(init_locale);
+    }
+
+    obs_data_slider = [];
+    <% for observation in @observations %>
+      var obs_<%= observation.id %> = {};
+      <% if observation.user.name and observation.user.name != ''%>
+      obs_<%= observation.id %>.name = '<%= observation.user.name.html_safe %>';
+      <% else %>
+      obs_<%= observation.id %>.name = '<%= observation.user.login.html_safe %>';
+      <% end %>
+      obs_<%= observation.id %>.url = '<%= observations_by_login_url(observation.user.login) %>';
+      <% unless observation.species_guess.blank? %>
+        obs_<%= observation.id %>.especie = '<%= observation.species_guess.html_safe %>';
+      <% else %>
+        obs_<%= observation.id %>.especie = '<%=t :something %>';
+      <% end %>
+      obs_<%= observation.id %>.especie_url = '<%= observation_path(observation) %>';
+      obs_data_slider[<%= observation.id %>] = obs_<%= observation.id %>;
+
+      obs_<%= observation.id %>.place_guess_url = '<%= observation_place_guess(observation).html_safe %>';
+    <% end %>
+    var getItemId = function(id){
+      return parseInt(id.substring(id.indexOf("_")+1));
+    };
+
+    var clearMarkers = function(){
+      for(var i = 0; i < features.length; i++){
+        features[i].marker.setMap(null);
+      }
+    };
+    var setCurrentMarker = function(marker){
+      clearMarkers();
+      marker.setMap(map);
+      map.panTo(marker.getPosition());            
+    };
+
+    var getFirstPhoto = function(photos){
+        for(var i = 0; i < photos.length; i++){
+            if(photos[i].position && photos[i].position == 1){
+                return photos[i];
+            }
+        }
+        return photos[0];
+    };
+
+    var fillSlide = function(id, observation){
+      //$("#item_" + id ).children("div.carousel-caption").children("h3").text(observation.species_guess);
+      obs_userdata = obs_data_slider[observation.id];
+      $("#bottom").html(data_slice_to_html(obs_userdata));
+      $("#item_" + id ).children("img").attr("src",observation.observation_photos[0].photo.large_url);
+      //$("#item_" + id ).children("img").attr("src","/attachments/local_photos/Voltor_tallat_slider.png");
+      //http://localhost:4000/attachments/local_photos/Voltor_tallat_slider.png
+      /*var capped_desc = "...";
+      if(observation.description){
+      	capped_desc = observation.description.length > 40 ? observation.description.substring(0, 37) + "..." : observation.description.substring(0, observation.description.length);
+      }
+      $("#item_" + id ).children("div.carousel-caption").children("p").text(capped_desc);
+      $("#item_" + id ).children("div.carousel-caption").children("a").attr("href","/observations/" + observation.id);
+      var formatted_sp_guess = observation.species_guess || "Algo...";
+      $("#item_" + id ).children("div.carousel-caption").children("a").text(formatted_sp_guess);*/
+    }
+
+    var truncate = function(str,n){
+      return (str.length > n) ? str.substr(0,n-1)+'&hellip;' : this;
+    };
+
+    var getInfoWindow = function() {
+  		if (!infoWindow) {
+    		infoWindow = new google.maps.InfoWindow({
+       	content: $('<div class="loading status">Loading...</div>').get(0),
+       	position: new google.maps.LatLng(0,0)
+    	})
+  	}
+  		return infoWindow;
+		}
+
+    var setLocaleCookie = function(locale_string) {
+      document.cookie = "locale=" + locale_string;
+    }
+
+    $('#locale_eu').click( function() { setLocaleCookie('eu'); activate_locale_link('eu'); } );
+    $('#locale_es').click( function() { setLocaleCookie('es'); activate_locale_link('es'); } );
+    $('#locale_ca').click( function() { setLocaleCookie('ca'); activate_locale_link('ca'); } );
+    $('#locale_gl').click( function() { setLocaleCookie('gl'); activate_locale_link('gl'); } );
+    $('#locale_en').click( function() { setLocaleCookie('en'); activate_locale_link('en'); } );
+
+    $('.nav-button').click( function() {
+      $(".nav-button").removeClass("active");
+      $(this).addClass("active");
+    });
+
+    // Activate Carousel
+    $('#obsCarousel').carousel({interval:5000});
+
+    // Enable Carousel Indicators
+    $(".item1").click(function(){
+      $("#obsCarousel").carousel(0);
+  	});
+    $(".item2").click(function(){
+      $("#obsCarousel").carousel(1);
+	  });
+	  $(".item3").click(function(){
+      $("#obsCarousel").carousel(2);
+    });
+    $(".item4").click(function(){
+	    $("#obsCarousel").carousel(3);
+    });
+    $('#obsCarousel').on('slide.bs.carousel', function (e) {
+      var id = getItemId(e.relatedTarget.id);
+      setCurrentMarker(features[id].marker);
+      fillSlide(id,features[id].observation);
+    });
+		
+    // Enable Carousel Controls
+    $(".left").click(function(){
+      $("#obsCarousel").carousel("prev");
+    });
+    $(".right").click(function(){
+      $("#obsCarousel").carousel("next");
+    });
+	  var $grid = $('.grid').isotope({
+	    itemSelector: '.grid-item',
+	    masonry: {
+	      columnWidth: 285
+	    }
+	  });
+	  $(".observations-button").click(function(){
+      $grid.isotope({ filter: '.observaciones' });
+	  });	
+	  $(".especies-button").click(function(){
+	    $grid.isotope({ filter: '.especies' });
+    });	
+    $(".proyectos-button").click(function(){
+      $grid.isotope({ filter: '.proyectos' });
+    });	
+    $(".todo-button").click(function(){
+      $grid.isotope({ filter: '*' });
+    });	
+    $(".lugares-button").click(function(){
+      $grid.isotope({ filter: '.lugares' });
+    });	
+    $(".gente-button").click(function(){
+      $grid.isotope({ filter: '.gente' });
+    });
+    $(".func-button").click(function(){
+      $grid.isotope({ filter: '.func' });
+    });
+
+    //init slide 0
+    setCurrentMarker(features[0].marker);
+    fillSlide(0,features[0].observation);
+
+    $grid.isotope({ filter: '.func' });
+
+    $("#webTicker").webTicker();
+
+  });
+
+</script>
+</head>
+<body class="browser">
+  <% unless @headless -%>
+    <% cache(:controller => 'welcome', :action => 'header', :for => logged_in? ? current_user.id : nil, :version => ApplicationController::HEADER_VERSION, :site_name => @site ? @site.name : SITE_NAME) do %>
+    <%= render :partial => 'shared/header' %>
+    <% end %>
+  <% end -%>
+
+<div class="container">
+	<div id="banner" class="row">
+    <div class="calltoaction">
+      <%= link_to t(:sign_up!), signup_url %>
+    </div>
+    <div class="calltoaction explore">
+      <%= link_to t(:explore!), observations_path %>
+    </div>
+		<img src="/assets/natusfera_banner_3.jpg">
+	</div>
+  <div class="row">
+    <!--<ul style="width:100%;" class="nav navbar-nav lang">
+      <li style="width:20%;"><a style="padding-left:100px;" id="locale_ca" href="/">CA</a></li>
+      <li style="width:20%"><a style="padding-left:100px;" id="locale_en" href="/">EN</a></li>
+      <li style="width:20%"><a style="padding-left:100px;" id="locale_es" href="/">ES</a></li>
+      <li style="width:20%"><a style="padding-left:100px;" id="locale_eu" href="/">EUS</a></li>
+      <li style="width:20%"><a style="padding-left:100px;" id="locale_gl" href="/">GAL</a></li>
+    </ul>-->
+    <div style="text-align: center;">
+    <a class="locale_link" id="locale_ca" href="/">CAT</a> /
+    <a class="locale_link" id="locale_es" href="/">ES</a> /
+    <a class="locale_link" id="locale_en" href="/">EN</a> /
+    <a class="locale_link" id="locale_eu" href="/">EUS</a> /
+    <a class="locale_link" id="locale_gl" href="/">GAL</a>
+    </div>
+  </div>
+
+  <% if @announcement -%>
+    <div class="row">
+      <ul id="webTicker">
+        <% for ann in @announcement %>
+          <%= render :partial => "announcements/announcement", :locals => { :announcement => ann } %>
+        <% end %>
+      </ul>
+    </div>
+  <% end -%>
+
+	<div class="row">	
+		<!--<div id="slider-container" class="col-md-6 nopadding">-->
+			<div id="obsCarousel" class="carousel slide" data-ride="carousel">
+		  <!-- Indicators -->
+		  <ol class="carousel-indicators">
+			<li data-target="#obsCarousel" data-slide-to="0" class="active"></li>
+			<li data-target="#obsCarousel" data-slide-to="1"></li>
+			<li data-target="#obsCarousel" data-slide-to="2"></li>
+			<li data-target="#obsCarousel" data-slide-to="3"></li>
+		  </ol>
+
+		  <!-- Wrapper for slides -->
+		  <div class="carousel-inner" role="listbox">
+			<div id="item_0" class="item active">
+			  <img src="">
+			  <div class="carousel-caption">
+				<!--<h3></h3>-->
+				<a></a>
+				<p></p>
+			  </div>
+			</div>
+
+			<div id="item_1" class="item">
+			  <img src="">
+			  <div class="carousel-caption">
+				<!--<h3></h3>-->
+				<a></a>
+				<p></p>
+			  </div>
+			</div>
+
+			<div id="item_2" class="item">
+			  <img src="">
+			  <div class="carousel-caption">
+				<!--<h3></h3>-->
+				<a></a>
+				<p></p>
+			  </div>
+			</div>
+
+			<div id="item_3" class="item">
+			  <img src="">
+			  <div class="carousel-caption">
+				<!--<h3></h3>-->
+				<a></a>
+				<p></p>
+			  </div>
+			</div>
+		  </div>
+
+		  <!-- Left and right controls -->
+		  <a class="left carousel-control" href="#obsCarousel" role="button" data-slide="prev">
+			<span class="glyphicon glyphicon-chevron-left" aria-hidden="true"></span>
+			<span class="sr-only"><% t :previous %></span>
+		  </a>
+		  <a class="right carousel-control" href="#obsCarousel" role="button" data-slide="next">
+			<span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>
+			<span class="sr-only"><% t :next %></span>
+		  </a>
+      <div id="bottom">
+      </div>
+        <div id="observation_count">
+          <div class="count_banner_n"><%= @observations_count %></div>
+          <!--<div class="count_banner"><%= t('observations') %></div>-->
+          <div class="count_banner"><%= link_to t(:observations), observations_path, :class=> "cblink" %></div>
+        </div>
+        <div id="species_count">
+          <div class="count_banner_n"><%= @species_count %></div>
+          <div class="count_banner"><%= link_to t(:species), taxa_path, :class => "cblink" %></div>
+        </div>
+        <div id="people_count">
+          <div class="count_banner_n"><%= @people_count %></div>
+          <div class="count_banner"><%= link_to t(:people), people_path, :class => "cblink" %></div>
+        </div>
+        <div id="map-container">
+          <div id="map"></div>
+        </div>
+		</div>
+		<!--</div>-->
+		<!--<div id="map-container" class="col-md-6 nopadding">
+			<div id="map"></div>
+		</div>-->
+	</div>
+  <!--<div class="row">-->
+  <div class="row green-fill">
+    <div class="col-md-12">
+      <%= image_tag("como_funciona.#{I18n.locale}.png", :class => "pre-footer") %>
+      <!--<img class="pre-footer" src="/assets/como_funciona.#{I18n.locale}.png" alt="Como funciona?">-->
+    </div>
+  </div>
+
+  <!-- start nav -->
+	<!--<nav class="navbar navbar-default" role="navigation">-->
+  <div class="row green-fill">
+      <div class="col-sm-2 sidebar-nav">
+        <!--<div class="sidebar-nav">-->
+          <!--<div class="navbar-header">
+            <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar-collapsible-1" aria-expanded="false">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            </button>
+          </div>-->
+          <!--<div class="collapse navbar-collapse" id="navbar-collapsible-1">-->
+        <ul class="nav navbar-nav white-fill">
+          <li class="stretch">
+            <span class="span_right"><a class="func-button nav-button active" href="#navbar-collapsible-1"><h4 class="list-group-item-heading"><%= t('views.welcome.index.funcion') %></h4></a></span>
+          </li>
+          <li class="stretch">
+            <span class="span_right">
+            <a class="observations-button nav-button" href="#navbar-collapsible-1">
+              <h4 class="list-group-item-heading"><%= t('observations') %></h4>
+            </a>
+              </span>
+          </li>
+          <li class="stretch">
+            <span class="span_right">
+            <a class="especies-button nav-button" href="#navbar-collapsible-1">
+              <h4 class="list-group-item-heading"><%= t('species') %></h4>
+            </a>
+              </span>
+          </li>
+          <li class="stretch">
+            <span class="span_right">
+            <a class="proyectos-button nav-button" href="#navbar-collapsible-1">
+              <h4 class="list-group-item-heading"><%= t('projects') %></h4>
+            </a>
+              </span>
+          </li>
+          <li class="stretch">
+            <span class="span_right">
+            <a class="gente-button nav-button" href="#navbar-collapsible-1">
+              <h4 class="list-group-item-heading"><%= t('people') %></h4>
+            </a>
+            </span>
+          </li>
+        </ul>
+          <!--</div>-->
+      </div>
+      <!--</div>-->
+	<!--</nav>-->
+  <!-- end nav -->
+	<!-- Inici grid -->
+      <div class="col-sm-10 sidebar-content">
+	      <div class="grid">
+          <div class="row">
+            <div class="grid-item func">
+              <div class="inner-grid-wrapper-small">
+                <%= image_tag("register.jpg") %>
+                <h4><%= t('views.welcome.index.manten_un_registro') %></h4>
+                <p><%= t('views.welcome.index.manten_un_registro_l') %></p>
+              </div>
+            </div>
+            <div class="grid-item func">
+              <div class="inner-grid-wrapper-small">
+                <%= image_tag("identify.jpg") %>
+                <h4><%= t('views.welcome.index.identifique') %></h4>
+                <p><%= t('views.welcome.index.identifique_l') %></p>
+              </div>
+            </div>
+            <div class="grid-item func">
+              <div class="inner-grid-wrapper-small">
+                <%= image_tag("learn.jpg") %>
+                <h4><%= t('views.welcome.index.aprenda') %></h4>
+                <p><%= t('views.welcome.index.aprenda_l') %></p>
+              </div>
+            </div>
+            <div class="grid-item func">
+            <div class="inner-grid-wrapper-small">
+              <%= image_tag("data.jpg") %>
+              <h4><%= t('views.welcome.index.cree') %></h4>
+              <p><%= t('views.welcome.index.cree_l') %></p>
+            </div>
+          </div>
+          </div>
+          <div class="row">
+            <div class="grid-item func">
+              <div class="inner-grid-wrapper-small">
+                <%= image_tag("ci_sc.jpg") %>
+                <h4><%= t('views.welcome.index.convierte') %></h4>
+                <p><%= t('views.welcome.index.convierte_l') %></p>
+              </div>
+            </div>
+            <div class="grid-item func">
+              <div class="inner-grid-wrapper-small">
+                <%= image_tag("bioblitz.jpg") %>
+                <h4><%= t('views.welcome.index.bioblitz') %></h4>
+                <p><%= t('views.welcome.index.bioblitz_l') %></p>
+              </div>
+            </div>
+            <% if CONFIG.iphone_app_url and false %>
+            <div class="grid-item func">
+                <div class="inner-grid-wrapper-small applink">
+                  <a href="<%= CONFIG.iphone_app_url %>"><img src="<%= asset_path("apple_app_store.png") %>"></a>
+                </div>
+            </div>
+            <% end %>
+            <% if CONFIG.android_app_url and false %>
+            <div class="grid-item func">
+              <div class="inner-grid-wrapper-small applink">
+                <a href="<%= CONFIG.android_app_url %>"><img src="<%= asset_path("android_market.png") %>"></a>
+              </div>
+            </div>
+            <% end %>
+          </div>
+            <div class="row">
+            <% for taxon in Taxon::ICONIC_TAXA %>
+            <div class="grid-item especies">
+              <div class="inner-grid-wrapper-small">
+                <div class="section-label">
+                  <span><%= taxon_image(taxon, :size => "small", :class => "taxonimage") %></span>
+                  <%= link_to t("all_taxa.#{Taxon::ICONIC_TAXON_NAMES[taxon.name].gsub(' ','_').gsub('-','_').downcase}", :default=>Taxon::ICONIC_TAXON_NAMES[taxon.name]), taxon_path(taxon), :class => "label-species" %>
+                  <% if taxon.photos.exists? %>
+                    <span><%= t :photo %>: <%= link_to taxon.photos.first.attribution, taxon.photos.first.native_page_url,:class => "photo_caption" %></span>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+            <% end %>
+            <div class="grid-item especies">
+              <div class="inner-grid-wrapper-small">
+                <div class="section-label">
+                  <span><%= image_tag ("species_more.png") %></span>
+                  <%= link_to t(:species).upcase, taxa_path, :class => "label-species" %>
+                </div>
+              </div>
+            </div>
+		      </div>
+		      <div class="row">
+            <% for observation in @sample_observations %>
+            <div class="grid-item observaciones">
+                <div class="inner-grid-wrapper-small">
+                  <div class="section-label">
+                    <span><img src="<%= observation.observation_photos[0].photo.small_url  %>"></span>
+                    <% unless observation.species_guess.blank? %>
+                      <%= link_to observation.species_guess.html_safe, observation_path(observation), class: "label-observaciones" %>
+                    <% else %>
+                      <%= link_to "#{t(:something)}...", observation_path(observation), class: "label-observaciones" %>
+                    <% end %>
+                    <!--p><%#= truncate(observation.description.html_safe, length: 40) %></p-->
+                    <span><%=t :observer %>: <%= link_to observation.user.login, observations_by_login_url(observation.user.login), :class => "observer_caption" %></span>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+            <div class="grid-item observaciones">
+        <div class="inner-grid-wrapper-small">
+          <div class="section-label">
+            <span><%= image_tag ("observations_more.png") %></span>
+            <%= link_to t(:observations).upcase, observations_path, :class => "label-observaciones" %>
+          </div>
+        </div>
+      </div>
+		      </div>
+          <div class="row">
+            <% for project in @sample_projects %>
+            <div class="grid-item proyectos">
+                <div class="inner-grid-wrapper-small">
+                  <div class="section-label">
+                    <span><%= image_tag project.icon.url(:span2), :id => "iconimg", :class => "project_picture" %></span>
+                    <%= link_to truncate(project.title.html_safe, length:40), project_path(project), class: "label-proyectos" %>
+                    <span>
+                      <%= t :owner %>: <%= link_to project.user.login, projects_by_login_url(project.user.login), :class => "photo_caption" %>
+                      <% if project.child? %>
+                        <br><%= t :subproject %> <%= t :of %>: <%= link_to truncate(project.parent.title, length: 40), project_path(project.parent), :class => "photo_caption" %>
+                    <% end %>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+            <div class="grid-item proyectos">
+            <div class="inner-grid-wrapper-small">
+              <div class="section-label">
+                <span><%= image_tag ("projects_more.png") %></span>
+                <%= link_to t(:projects).upcase, projects_path, :class => "label-proyectos" %>
+              </div>
+            </div>
+          </div>
+          </div>
+		      <div class="row">
+            <% for user in @sample_users %>
+            <div class="grid-item gente">
+                <div class="inner-grid-wrapper-small">
+                  <div class="section-label">
+                    <% if user.icon_file_name? %>
+                      <span class="fullframe"><%= user_image(user, :size => "medium") %></span>
+                    <% else %>
+                      <span class="fullframe"><%= user_image(user, :size => "medium", :class => "homegriduser") %></span>
+                    <% end %>
+                    <%= link_to truncate(user.login.html_safe, length:40), user_path(user), class: "label-gente" %>
+                    <% if user.description? %>
+                      <p><%= truncate(user.description.html_safe, length:100) %></p>
+                    <% else %>
+                      <p><%= t(:user_is_a_naturalist, :user => user.login) %></p>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+            <div class="grid-item gente">
+          <div class="inner-grid-wrapper-small">
+            <div class="section-label">
+              <span><%= image_tag ("people_more.png") %></span>
+              <%= link_to t(:people).upcase, people_path, :class => "label-gente" %>
+            </div>
+          </div>
+        </div>
+		      </div>
+	      </div> <!-- Fi grid -->
+      </div> <!-- Fi col-sm-10 -->
+  </div>
+
+	<div class="row">
+		<div class="col-md-12 section-end"></div>
+	</div>
+	<!--Pre-footer-->
+	<div class="row legal">
+		<div class="col-md-3 no-right-separator">
+			<img src="/assets/natusfera_legal.png">
+		</div>
+		<div class="col-md-2">
+			<ul class="list-group lgdown">
+				<li class="list-group-item menulegalitem">
+					<%= link_to t(:observations), observations_path %>
+				</li>
+				<li class="list-group-item menulegalitem">
+					<%= link_to t(:species), taxa_path %>
+				</li>
+				<li class="list-group-item menulegalitem">
+					<%= link_to t(:projects), projects_path %>
+				</li>
+				<li class="list-group-item menulegalitem">
+					<%= link_to t(:places), places_path %>
+				</li>
+				<li class="list-group-item menulegalitem">
+					<%= link_to t(:guides), guides_path %>
+				</li>
+				<li class="list-group-item menulegalitem">
+					<%= link_to t(:people), people_path %>
+				</li>				
+			</ul>
+		</div>
+		<div class="col-md-2">
+			<ul class="list-group lgdown">
+        <li class="list-group-item menulegalminoritem"><a href="<%= CONFIG.about_url %>"><%= t(:about_x, :x => CONFIG.site_name) %></a></li>
+        <li class="list-group-item menulegalminoritem"><a href="<%= CONFIG.help_url %>"><%= t(:help) %></a></li>
+        <% if CONFIG.admin_email %>
+				  <li class="list-group-item menulegalminoritem"><a href="mailto:<%= CONFIG.admin_email %>">Contacto</a></li>
+        <% end %>
+				<!--<li class="list-group-item menulegalminoritem"><a href="<#%= CONFIG.terms_url %>"><#%= t(:terms_service) %></a></li>-->
+				<li class="list-group-item menulegalminoritem"><a href="<%= CONFIG.privacy_url %>"><%= t(:privacy) %></a></li>
+			</ul>
+		</div>
+		<div class="col-md-2 lgdown">
+      <% if CONFIG.iphone_app_url %>
+        <a href="<%= CONFIG.iphone_app_url %>"><img class="applogo" src="<%= asset_path("apple_app_store.png") %>"></a>
+      <% end %>
+      <% if CONFIG.android_app_url %>
+        <a href="<%= CONFIG.android_app_url %>"><img class="applogo" src="<%= asset_path("android_market.png") %>"></a>
+      <% end %>
+		</div>
+    <div class="col-md-3 lgdown">
+      <% if CONFIG.twitter_url %>
+        <a style="margin-left: 30%;" href="<%= CONFIG.twitter_url %>" target="_blank"><img src="<%= asset_path("twitter-home.png") %>"></a>
+      <% end %>
+      <% if CONFIG.admin_email %>
+        <a style="margin-left: 10px;" href="mailto:<%= CONFIG.admin_email %>"><img src="<%= asset_path("email-home.png") %>"></a>
+      <% end %>
+    </div>
+		<!--<div class="col-md-4">
+			<div class="input-group">
+				<input type="text" class="form-control" placeholder="SUSCRIBETE A NUESTRAS NOTICIAS...">
+				<span class="input-group-btn">
+					<button class="btn btn-default" type="button"><span class="glyphicon glyphicon-envelope" aria-hidden="true"></span></button>
+				</span>
+			</div>
+	</div>-->
+</div>
+  <% if CONFIG.custom_footer %>
+      <div class="row">
+        <div id="footer" class="clear">
+          <div style="text-align: center">
+            <%= raw CONFIG.custom_footer %>
+          </div>
+        </div>
+      </div>
+  <% end %>
+  <div class="row sublegal">
+    <div style="text-align: center;" class="row">
+      <a href="<%= CONFIG.about_url %>"><%= t(:about_x, :x => CONFIG.site_name) %> / </a>
+      <a href="<%= CONFIG.help_url %>"><%= t(:help) %> / </a>
+      <a href="mailto:<%= CONFIG.admin_email %>">Contacto / </a>
+      <!-- <a href="<#%= CONFIG.terms_url %>"><#%= t(:terms_service) %> / </a>-->
+      <a href="<%= CONFIG.privacy_url %>"><%= t(:privacy) %></a>
+    </div>
+    <div style="text-align: center;" class="row">
+      <span><%= t :powered_by_inaturalist_open_source_software_html %></span>
+    </div>
+  </div>
+  <% if logged_in? -%>
+      <script type="text/javascript" charset="utf-8">
+        setUpdatesCount(<%= session[:updates_count].to_i %>)
+        setTimeout(getUpdatesCount, 1000)
+        setMessagesCount(<%= session[:messages_count].to_i %>)
+        setTimeout(getMessagesCount, 1000)
+      </script>
+  <% end -%>
+</body>
+</html>
